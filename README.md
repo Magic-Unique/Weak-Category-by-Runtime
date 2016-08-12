@@ -5,7 +5,7 @@ Magic-Unique 冷秋
 [TOC]
 
 ## 事先说好
-​	前不久看到 [@sunnyxx](http://weibo.com/p/1005051364395395) 想找一个性取向正常的实习生帮他分担一点工作量，当想起他和 [@ibireme]( http://weibo.com/ibireme) 秀的亲密自拍后我就知道事情并没有这么简单→_→。但是作为性取向正常的我还是比较关心滴滴的招人水准，于是我便想起了之前他发的一份面试题，其中有一题就是**如何使用Runtime实现weak属性**。在那之后 [@子循](http://weibo.com/chenyl107) 整理了一份有关这一份面试题的答案，也包括了这个题目。
+​	前不久看到 [@sunnyxx](http://weibo.com/p/1005051364395395) 想找一个性取向正常的实习生帮他分担一点工作量，当想起他和 [@ibireme]( http://weibo.com/ibireme) 秀的亲密自拍后我就知道事情并没有这么简单→_→。但是作为性取向正常的我还是比较关心滴滴的招人水准，于是我便想起了之前他发的一份[面试题](http://blog.sunnyxx.com/2015/07/04/ios-interview/)，其中有一题就是**如何使用Runtime实现weak属性**。在那之后 [@iOS程序犭袁](http://weibo.com/luohanchenyilong) 整理了一份有关这一份面试题的 [参考答案](https://github.com/ChenYilong/iOSInterviewQuestions/blob/master/01《招聘一个靠谱的iOS》面试题参考答案/《招聘一个靠谱的iOS》面试题参考答案（上）.md)，也包括了这个题目。
 ​	看了整理的答案后觉得方法妥当，唯一不足的是不够严谨。于是我自己学习答案上的思维后修补了一些不足之处。如有大神觉得可以改进的地方望不吝指出~。
 
 ​	前方高能预警！！！！老司机要开车了！！请站稳坐稳手扶好。。。
@@ -51,12 +51,15 @@ id objc_getAssociatedObject(id obj, const void *key);
 ​	我偷偷告诉你，`key` 是一个坑。。。其实 `key` 是一个很好理解的东西，说白了就是属性名称嘛，而且又是`const void *`类型的，那传一个 C 字符串不就好了？于是我们可以这样写：
 
 ```objective-c
+/** 这是 某个已有类 的分类 CategoryProperty 在 .h 文件中的一个新增的属性 */
 @property (nonatomic, strong) NSObject *categoryProperty;
 
+/** 这是 .m 文件中的 set 方法的实现 */
 - (void)setCategoryProperty:(id)categoryProperty {
 	objc_setAssociatedObject(self, "categoryProperty", categoryProperty, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+/** 这是 .m 文件中的 get 方法的实现 */
 - (id)categoryProperty {
 	return objc_getAssociatedObject(self, "categoryProperty");
 }
@@ -65,12 +68,17 @@ id objc_getAssociatedObject(id obj, const void *key);
 ​	恩，测试了一下没毛病，但是我觉得这个关联对象可以封装成 `NSObject` 的一个分类，以便日后操作。于是可以这样写：
 
 ```objective-c
+/**
+ * 这是 NSObject 基于 Runtime 而增加的分类，之后如果想要给现有的类添加属性的话，可以直接调用这个分类
+ **/
 @implementation NSObject (Association)
-  
+
+/** 所有要增加的属性的 set 方法都可以调用这个方法来实现 */
 - (void)setAssociatedObject:(id)obj forKey:(NSString *)key {
 	objc_setAssociatedObject(self, key.UTF8String, categoryProperty, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+/** 所有要增加的属性的 get 方法都可以调用这个方法来实现 */
 - (id)associatedObjectForKey:(NSString *)key {
 	return objc_getAssociatedObject(self, key.UTF8String);
 }
@@ -81,12 +89,15 @@ id objc_getAssociatedObject(id obj, const void *key);
 ​	恩，测试了一下没毛病，之后我们就可以这样给已有的类添加属性了：
 
 ```objective-c
+/** 这是 某个已有类 的分类，并基于上述的 NSObject 的 Runtime 分类而实现的增加属性 */
 @property (nonatomic, strong) NSObject *categoryProperty;
 
+/** 利用上述的分类添加属性的 set 方法的实现 */
 - (void)setCategoryProperty:(id)categoryProperty {
 	[self setAssociatedObject:categoryProperty forKey:@"categoryProperty"];
 }
 
+/** 利用上述的分类添加属性的 get 方法的实现 */
 - (id)categoryProperty {
 	return [self associatedObjectForKey:@"categoryProperty"];
 }
@@ -95,7 +106,7 @@ id objc_getAssociatedObject(id obj, const void *key);
 ​	恩，测试了一下没毛病。诶？不知是什么力量让我想到了如果我传入的是一个 `NSMutableString` 或者是由程序运行期间生成的 `NSString` 会怎么样呢？他们的内容一样，对应的 `UTF8String` 的指针指向的 `char *` 的内容也一样，但是 `UTF8String` 的地址不一样，这样会影响到取值吗？程序猿要有44944的决心！
 
 ```objective-c
-NSObject *obj = [NSObject new];
+NSObject *obj = [NSObject new];		// create a object to bind new property
 NSString *nameForValue = @"Xcode";	// name value
 NSString *nameForCode = @"name";	// name key 1
 NSString *nameForBind = [@"na" stringByAppendingString:@"me"];	// name key 2
@@ -105,7 +116,40 @@ NSLog(@"%@", [obj associatedObjectForKey:nameForBind]);	// read value with key2 
 
 ​	看到这里有一种“大清要完”的感觉。。。好吧，其实这个 `key` 并不只是读 C 字符串那么复杂，实际上仅仅是单纯地用一个地址（当然你可以理解为一个 `long long long long` 的整数）作为键来保存该关联关系。。要不要这么坑！！！
 
-​	但是，**轮子一定要方便使用**才能成为好轮子啊！那怎么办？！？在什么环境下 `nameForCode` 和 `nameForBind` 是相同的呢？那就只能是容器类！
+> ​	再扩充，为什么之前在代码里写死 `key` 却很正常呢？`set` 方法和 `get` 方法里分别**写死**了两个相同的字符串，而不是使用同一个变量传入。
+>
+> ​	因为**在代码里写死的字符串会在程序运行期间与可执行的汇编代码被操作系统从硬盘中拷贝到内存中，并且保存在当前进程的代码区**。代码区里的数据是无法更改的。这一点可以用下面简单的代码来验证：
+>
+> ```c
+> char *pre = "Hello ";
+> char *suf = "Word!";
+> char *newStr = strcat(pre, suf); // => error
+> ```
+>
+> ​	而**编译器在编译过程中会整理好所有代码里写死的字符串，并把他们统一整理到编译后的文件的某一块区域**，这一点可以用 `IDE` 来验证：
+>
+> ![IDE "IDE逆向后的内容布局"](resources/IDE-Preferences.png)
+>
+> ​	图为 iOS 系统设置 App 的可执行文件内容布局图，蓝色部分是可执行的代码，灰色部分是字符串（包括所有的类名、所有方法名、所有函数名、所有框架路径等等，以及 coder 写死的字符串）。编译器在整理代码中的字符串的时候，发现两个字符串相同，于是在字符串表里只保存了一个字符串，并将两处的代码的引用指向这个表的同一个字符串中，我们也可以用简易的代码来验证一下：
+>
+> ```objective-c
+> NSString *str1 = @"123";
+> NSString *str2 = @"123";
+> NSString *str3 = [[NSString alloc] initWithString:str1];
+> NSString *str4 = [str1 stringByAppendingString:@""];
+> NSLog(@"%p, %p", str1, str1.UTF8String);	// 0x100001050, 0x100000f4e
+> NSLog(@"%p, %p", str2, str2.UTF8String);	// 0x100001050, 0x100000f4e
+> NSLog(@"%p, %p", str3, str3.UTF8String);	// 0x100001050, 0x100000f4e
+> NSLog(@"%p, %p", str4, str4.UTF8String);	// 0x100001050, 0x100000f4e
+>         
+> char *cstr1 = "321";
+> char *cstr2 = "321";
+> printf("%p\n", cstr1);	// 0x100000f60
+> printf("%p\n", cstr2);	// 0x100000f60
+> ```
+
+​	但是，**轮子一定要方便使用**才能成为好轮子啊！那怎么办？！？
+在什么环境下 `nameForCode` 和 `nameForBind` 是相同的呢？那就只能是容器类（集合类）！
 
 ​	在 `NSDictionary` 中，用这两个 `name` 作为 `key` 可以取到相同的对象，所以我们可以考虑将 `const char *` 作为 `value` ，`NSString *` 作为 `key` 保存在一个 `NSDictionary` 中，然后利用这个字典将内容相同的 `NSString` 统一转为同一个 `const char *` 值就好了么~似乎很有道理，但是 `const char *` 是基本数据类型，不能保存到 OC 容器类中，所以我们需要用 `NSValue` 来包装一下。
 
@@ -116,9 +160,10 @@ typedef NS_ENUM(NSUInteger, NSAssociation) {
     NSAssociationAssign,
     NSAssociationRetain,
     NSAssociationCopy,
-    NSAssociationWeak, //这里是新建的
+    NSAssociationWeak, //这里是新建的，之后再实现
 };
 
+/** 这是一个 NSString => NSValue(const char *) 的字典 */
 static NSMutableDictionary *keyBuffer;
 
 @implementation NSObject (Association)
@@ -127,7 +172,14 @@ static NSMutableDictionary *keyBuffer;
     keyBuffer = [NSMutableDictionary dictionary]; // 创建字典
 }
 
-/** set 方法 */
+/**
+ * set 方法，以供以后添加属性时候给这个属性的 set 方法调用
+ *
+ * @param	object		要关联的对象，也就是要设置的新的属性值
+ * @param	key			属性名称，传入新增属性的名称
+ * @param	association	修饰符，枚举
+ * @param	isAtomic	原子性，是否线程安全，仅 copy/retain 有效
+ **/
 - (void)setAssociatedObject:(id)object forKey:(NSString *)key association:(NSAssociation)association isAtomic:(BOOL)isAtomic {
     const char *cKey = [keyBuffer[key] pointerValue]; // 先获取key
     if (cKey == NULL) { // 字典中不存在就创建
@@ -149,7 +201,6 @@ static NSMutableDictionary *keyBuffer;
             if (isAtomic) {
                 objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_COPY);
             } else {
-                
                 objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_COPY_NONATOMIC);
             }
             break;
@@ -161,7 +212,11 @@ static NSMutableDictionary *keyBuffer;
     }
 }
 
-/** get 方法 */
+/**
+ * get 方法，以供以后添加属性时候给这个属性的 get 方法调用
+ *
+ * @param	key		属性名称
+ */
 - (id)associatedObjectForKey:(NSString *)key {
     const char *cKey = [keyBuffer[key] pointerValue];
     if (cKey == NULL) {
@@ -172,7 +227,6 @@ static NSMutableDictionary *keyBuffer;
 }
 
 @end
-
 ```
 
 ​	这就是这个轮子的公开部分的代码了。
@@ -217,9 +271,37 @@ typedef OBJC_ENUM(uintptr_t, objc_AssociationPolicy) {
 
 ​	`hash` 值是一个 `NSUInteger` 类型的数值，我们可以通过重写 `hash` 方法来定制 `hash` 值的计算公式。但为了严谨，我们要保证 `isEqual:` 返回 `YES` 的两个对象的 `hash` 值要相等。
 
-## 原有方案分析
+## 原方案分析
 
-​	不管怎么样，在此先感谢出题者 [@sunnyxx](http://weibo.com/p/1005051364395395) 能够让我更深入的学习到 assign 和 weak 的知识以及后面的解决方案，同时也要感谢 [@子循](http://weibo.com/chenyl107) 之前整理的答案，让我有一种站在巨人的肩膀上的感觉。
+​	不管怎么样，在此先感谢出题者 [@sunnyxx](http://weibo.com/p/1005051364395395) 能够让我更深入的学习到 assign 和 weak 的知识以及后面的解决方案，同时也要感谢 [@iOS程序犭袁](http://weibo.com/luohanchenyilong) 之前整理的答案，让我有一种站在巨人的肩膀上的感觉。
+
+​	原文连接：[《招聘一个靠谱的 iOS》面试题参考答案（上）](https://github.com/ChenYilong/iOSInterviewQuestions/blob/master/01《招聘一个靠谱的iOS》面试题参考答案/《招聘一个靠谱的iOS》面试题参考答案（上）.md)
+
+​	当然，如果你喜欢看的话顺便也安利一波这篇文章所在的 repo （里面还有下篇） : [GitHub:ChenYilong/iOSInterviewQuestions](https://github.com/ChenYilong/iOSInterviewQuestions)
+
+​	原文里提到了 `weak` 的底层实现，并仿照其底层实现利用 runtime 实现了 `weak` 变量。具体的内容可以查看原文，在此仅提取比较易懂的部分。
+
+#### 最单纯的实现原理
+
+​	要实现 `weak` ，说白了就是要做到两点：1、引用计数器不变；2、对象销毁后自动设置为 `nil`。而在 `runtime` 所提供的枚举中，`OBJC_ASSOCIATION_ASSIGN` 就已经做到了第一点，我们只需要实现第二点即可。第二点是要在对象销毁后，将 `weak` 引用设置为 `nil` ，所以我们要捕获这个对象销毁的时机，或者接收这个对象销毁的事件。在 ARC 中，对象销毁时机其实就是 `dealloc` 方法调用的时候，我们可以在这个方法里将这个 `weak` 引用设置为 `nil`。于是我们可以有下面的思维图：（假设 a.xxx = b，则下图中“宿主对象”就是 a，“某属性”就是 xxx，“值对象”就是 b）
+
+![](resources/pic-first.png)
+
+​	要实现上图的逻辑，我们就需要在两个时机做很多事情：
+
+1.   建立 `weak` 引用时机，即执行 `宿主对象.某属性 = 值对象` 这段代码的时候
+
+     我们需要告诉“值对象”，*你被一个叫“宿主对象”的对象用“某属性”弱引用了*。值对象记录下 “谁” 用 “什么属性” 弱引用了自己，他才可以在自己倍销毁的时候去赋值。
+
+2.   值对象在 `dealloc` 方法里把 “谁” 的 “什么属性” 设置为 `nil`
+
+     值对象记录下了这两个信息后，就可以重写自己 `dealloc` 方法，并在方法里将 “谁” 的 “什么属性” 设置为 `nil`。
+
+这些就是基本的实现思路。
+
+## 需求分析
+
+## 定制方案
 
 ## 这“可能”是最完美的解决方案
 
