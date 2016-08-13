@@ -12,6 +12,6 @@
 
 @interface MUValueClass : NSObject
 
-- (void)setWeakReference:(id)hostObj forKey:(NSString *)key;
+- (void)setWeakReference:(id)hostObj forWipeSEL:(SEL)wipeSEL;
 
 @end

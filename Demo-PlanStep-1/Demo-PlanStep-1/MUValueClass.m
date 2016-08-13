@@ -11,20 +11,24 @@
 @interface MUValueClass ()
 {
 	__weak id _hostObj;
-	NSString *_hostKey;
+	SEL _hostWipeSEL;
 }
 
 @end
 
 @implementation MUValueClass
 
-- (void)setWeakReference:(id)hostObj forKey:(NSString *)key {
+- (void)setWeakReference:(id)hostObj forWipeSEL:(SEL)wipeSEL {
 	_hostObj = hostObj;
-	_hostKey = key;
+	_hostWipeSEL = wipeSEL;
 }
 
 - (void)dealloc {
-	[_hostObj performSelector:NSSelectorFromString(_hostKey) withObject:nil];
+	// 此处用宏取消 ARC 的警告
+#pragma clang diagnostic push	// 创建取消警告域
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+	[_hostObj performSelector:_hostWipeSEL withObject:nil];
+#pragma clang diagnostic pop	// 关闭取消警告域
 }
 
 @end

@@ -156,13 +156,6 @@ NSLog(@"%@", [obj associatedObjectForKey:nameForBind]);	// read value with key2 
 ​	于是我们有：
 
 ```objective-c
-typedef NS_ENUM(NSUInteger, NSAssociation) {
-    NSAssociationAssign,
-    NSAssociationRetain,
-    NSAssociationCopy,
-    NSAssociationWeak, //这里是新建的，之后再实现
-};
-
 /** 这是一个 NSString => NSValue(const char *) 的字典 */
 static NSMutableDictionary *keyBuffer;
 
@@ -177,39 +170,14 @@ static NSMutableDictionary *keyBuffer;
  *
  * @param	object		要关联的对象，也就是要设置的新的属性值
  * @param	key			属性名称，传入新增属性的名称
- * @param	association	修饰符，枚举
- * @param	isAtomic	原子性，是否线程安全，仅 copy/retain 有效
  **/
-- (void)setAssociatedObject:(id)object forKey:(NSString *)key association:(NSAssociation)association isAtomic:(BOOL)isAtomic {
+- (void)setAssociatedObject:(id)object forKey:(NSString *)key {
     const char *cKey = [keyBuffer[key] pointerValue]; // 先获取key
     if (cKey == NULL) { // 字典中不存在就创建
         cKey = key.UTF8String;
         keyBuffer[key] = [NSValue valueWithPointer:cKey];
     }
-    switch (association) {// 根据参数，用不同的 policy
-        case NSAssociationAssign:
-            objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_ASSIGN);
-            break;
-        case NSAssociationRetain:
-            if (isAtomic) {
-                objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_RETAIN);
-            } else {
-                objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
-            break;
-        case NSAssociationCopy:
-            if (isAtomic) {
-                objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_COPY);
-            } else {
-                objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_COPY_NONATOMIC);
-            }
-            break;
-        case NSAssociationWeak:
-      		// 这里是核心代码，先占坑。
-            break;
-        default:
-            break;
-    }
+  	objc_setAssociatedObject(self, cKey, object, OBJC_ASSOCIATION_RETAIN);
 }
 
 /**
@@ -228,8 +196,6 @@ static NSMutableDictionary *keyBuffer;
 
 @end
 ```
-
-​	这就是这个轮子的公开部分的代码了。
 
 ### policy 的选择
 
@@ -267,7 +233,7 @@ typedef OBJC_ENUM(uintptr_t, objc_AssociationPolicy) {
 
 ​	然而判断一个对象是否存在一个数组中，最简单的办法就是遍历，但是这也是最耗时的办法。如果你研究过算法，你可以尝试使用二分法、快速查找法等方法来检索一个项，这些仅限于有序数组。但是容器内保存的是复杂的对象，并不是一个可以比较大小的数值，所以这些算法行不通。
 
-​	苹果大大给出的方法是：在 `Foundation` 中，将一个对象存入容器类后，容器类会读取该对象的 `hash` 值，并且把这个值存入一个有序的列表中。之后，检索一个对象是否存在一个容器的时候，即可以取出 `hash` 值并通过各种算法，和这个有序的列表进行比较即可。
+​	苹果大大给出的方法是：在 `Foundation` 中，将一个对象存入容器类后，容器类会读取该对象的 `hash` 值，并且把这个值存入一个有序的列表中。之后，检索一个对象是否存在一个容器的时候，即可以取出 `hash` 值并依据当前容器中对象的个数选择最适合的算法，和这个有序的列表进行比较即可。
 
 ​	`hash` 值是一个 `NSUInteger` 类型的数值，我们可以通过重写 `hash` 方法来定制 `hash` 值的计算公式。但为了严谨，我们要保证 `isEqual:` 返回 `YES` 的两个对象的 `hash` 值要相等。
 
@@ -281,7 +247,7 @@ typedef OBJC_ENUM(uintptr_t, objc_AssociationPolicy) {
 
 ​	原文里提到了 `weak` 的底层实现，并仿照其底层实现利用 runtime 实现了 `weak` 变量。具体的内容可以查看原文，在此仅提取比较易懂的部分。
 
-#### 最单纯的实现原理
+### 最单纯的实现原理
 
 > 注意，本小节的解决方案以及 Demo 和原文中的参考答案不一样，本节仅仅是为了**分步骤分析**原文的参考答案
 
@@ -297,9 +263,58 @@ typedef OBJC_ENUM(uintptr_t, objc_AssociationPolicy) {
 
 2.   值对象在销毁时机，即在执行 `dealloc` 方法的时候
 
-     把自己记录的 “谁” 的 “什么属性” 设置为 `nil`。
+       把自己记录的 “谁” 的 “什么属性” 设置为 `nil`。
 
 这些就是基本的实现思路。同时，为了不影响 “宿主对象” 的生命周期，故 1 中保存 “宿主对象” 的引用也要是 `weak` 的。总结以上分析后，即可得到我们第一步的代码，你可以在**Demo-PlanStep-1**看到这个版本的代码。
+
+```objective-c
+/** ======== 以下是核心代码 ======= */
+
+/** 宿主类的分类 */
+
+@implementation MUHostClass (Association)
+
+const static char kValueObject = '0';
+
+- (void)setValueObject:(MUValueClass *)valueObject {
+	objc_setAssociatedObject(self, &kValueObject, valueObject, OBJC_ASSOCIATION_ASSIGN);
+	[valueObject setWeakReference:self forWipeSEL:@selector(setValueObject:)];
+}
+
+- (MUValueClass *)valueObject {
+	return objc_getAssociatedObject(self, &kValueObject);
+}
+
+@end
+  
+/** 值类的主要实现 */
+
+@interface MUValueClass ()
+{
+	__weak id _hostObj;
+	SEL _hostWipeSEL;
+}
+
+@end
+
+@implementation MUValueClass
+
+- (void)setWeakReference:(id)hostObj forWipeSEL:(SEL)wipeSEL {
+	_hostObj = hostObj;
+	_hostWipeSEL = wipeSEL;
+}
+
+- (void)dealloc {
+	// 此处用宏取消 ARC 的警告
+#pragma clang diagnostic push	// 创建取消警告域
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+	[_hostObj performSelector:_hostWipeSEL withObject:nil];
+#pragma clang diagnostic pop	// 关闭取消警告域
+}
+
+@end
+
+```
 
 ​	整理 **Demo-PlanStep-1** 的代码，即可知道初步方案的**开发者角度**的代码量：
 
@@ -310,9 +325,128 @@ typedef OBJC_ENUM(uintptr_t, objc_AssociationPolicy) {
 
 ​	排除轮子内部实现的代码量，使用轮子的人用 7 行代码即可实现一个 `weak` 属性，这一点还是可以接受的。方案一里需求基本达到，但是这个方案需要使用者在“有可能被弱引用的对象的类”里去写代码，违背了轮子的“不入侵源代码，减少对源代码的影响”的规则，故这个方案不可行，接下来改造方案一。
 
-## 需求分析
+### 参考答案中的实现
 
-## 定制方案
+> 注意，本小节的解决方案以及 Demo 和原文中的参考答案基本一致，仅个别命名不同，且均有上一小节改造而成。
+
+​	在上一小节中实现的轮子，最大的问题就是对项目的源代码入侵太严重（这里指需要在 `值类` 的 `主要实现` 中添加特定的代码）。本小节将改进，降低对源代码的影响（也就是在所有类的 `主要实现` 中不需要添加任何代码）。
+
+​	分析第一个方案中，对源代码入侵的部分：
+
+1. “值类”必须要有一个公开的方法，用于传递“宿主对象”和“属性”的 `set` 方法。
+
+   不在“主要实现”里给一个现有的类添加一个方法以及实现，OC 中“Category”是现成的啊！！！不过仔细想想，“值类”要 `weak` 引用“宿主对象”，并且这个要在“Category”中实现，这不就是本文的研究内容么 =  =。。这就很尴尬了。
+
+2. “值类”销毁的时候要执行一段特殊的代码（也就是 `宿主对象.某属性 = nil` ）
+
+   在 `dealloc` 方法里写代码主要目的还是捕获这个对象的销毁事件，要为这一部分优化的话，就必须换一个捕获方式。
+
+经过分析，遇到了两个难点。1、在 `Category` 中创建一个弱引用属性；2、换一种方式捕获对象销毁时机。
+
+​	很好，第一个难点好无方向，先解决第二个难点。
+
+​	对象销毁后必然调用它的 `dealloc` 方法，但我们又不能去修改这个方法，不如我们可以看看在没有重写 `dealloc` 时，这个方法到底干了什么（ARC）？其实很简单，我们只要思考一下在 `MRC` 下我们应该在 `dealloc` 方法里写什么？
+
+1. 对自己所有的强引用的 `Ivar` 发送 `release` 消息
+2. 对自己所有的强引用的关联对象发送 `release` 消息
+3. ...
+4. 调用 `[super dealloc]`
+
+前两项非常显眼（好吧，我故意的），总得来说，会释放自己所有强引用对象。第一点释放的是 `Ivar` 对象，`Ivar`是主要实现中的元素，所以我们不考虑，要不起。第二点是释放关联对象，刚好 `Category` 中就是用这个东西，可以考虑从他入手。
+
+> 扩展：当一个对象被发送 `release` 消息的时候，会将自己的引用计数器减一，如果此时引用计数器变为 0，则自毁。
+
+设想一下，假如有一个对象 a，被这个“值对象”强引用着，同时没有其余的对象强引用 a，即 a 的引用计数器在 a 活着的任何时间点都为 1，则 a 的销毁时间与“值对象”同步。即：
+
+```
+"值对象"的引用计数器为0
+|	-> “值对象”调用 dealloc 方法
+|	|	-> [a release]
+|	|	|	-> a 对象的引用计数器为 0
+|	|	|	|	->a 对象调用 dealloc 方法
+|	|	|	-> a 对象销毁
+-> "值对象"销毁
+```
+
+我们可以自己创建一个 A 类，然后在“宿主对象”和“值对象”建立 `weak` 关系的时候，偷偷地创建一个 A 类的实例 a，绑定在 “值对象” 上。当“值对象”销毁后，这个 a 也会被销毁。而 A 类是轮子的内部类，其 `dealloc` 方法可以随意改造。这样就可以把 `宿主对象.某属性 = nil` 这段代码写在 A 类的 `dealloc` 方法里。由于 `[a dealloc]` 与 `[值对象 dealloc]` 是一起执行的，我们便做到**在不改原有类的情况下捕获原有类的 `dealloc` 方法**。总结来说在 `Category` 里我们要用关联对象的方法让“值类型”强引用 a。
+
+​	由于 a 的存在，且 A 是一个内部类，因此我们可以给 A 类创建一个弱引用属性，让他持有“宿主对象”。同时可以给 A 类创建一个强引用属性，让他持有 `set` 方法。不知不觉就把问题 1 给解决了ヾ(=^▽^=)ノ。
+
+​	改造后的方案代码是**Demo-PlanStep-2**，思维图如下：
+
+![](resources/pic-second.png)
+
+整理核心代码，具体如下：
+
+```objective-c
+/** ======= 以下是核心代码 ======= */
+
+/** 宿主类的分类实现 */
+@implementation MUHostClass (Association)
+
+const static char kValueObject = '0';
+
+- (void)setValueObject:(MUValueClass *)valueObject {
+	objc_setAssociatedObject(self, &kValueObject, valueObject, OBJC_ASSOCIATION_ASSIGN);
+	/**
+	 *  虽然这里没有循环引用，但是还是需要用弱引用丢给 block
+	 *	因为 valueObj 持有 weakTask，weakTask 持有 block，block 持有 self
+	 *	因此 self 至少要等到 valueObj 销毁后才能销毁。严重影响到 self 的生命周期
+	 *	这是参考答案中的一个缺点
+	 *
+	 *	而使用传递 block 的方式清空属性，而不是传递 set 方法的 SEL 的方式，是为了防止形成递归
+	 */
+	__weak typeof(self) wself = self;
+	[valueObject setWeakReferenceTask:^{
+		objc_setAssociatedObject(wself, &kValueObject, nil, OBJC_ASSOCIATION_ASSIGN);
+	}];
+}
+
+- (MUValueClass *)valueObject {
+	return objc_getAssociatedObject(self, &kValueObject);
+}
+
+@end
+  
+/** 给所有的类添加扩展 */
+@implementation NSObject (MUWeakTask)
+
+static const char kWeakTask = '0';
+
+- (void)setWeakReferenceTask:(TaskBlock)task {
+	MUWeakTask *weakTask = [MUWeakTask taskWithTaskBlock:task];
+	objc_setAssociatedObject(self, &kWeakTask, weakTask, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+@end
+
+/** 传说中的 A 类 */
+  
+@implementation MUWeakTask
+
+- (instancetype)initWithTaskBlock:(TaskBlock)taskBlock {
+	self = [super init];
+	if (self) {
+		_taskBlock = [taskBlock copy];
+	}
+	return self;
+}
+
++ (instancetype)taskWithTaskBlock:(TaskBlock)taskBlock {
+	return [[self alloc] initWithTaskBlock:taskBlock];
+}
+
+- (void)dealloc {
+	if (self.taskBlock) {
+		self.taskBlock();
+	}
+}
+
+@end
+
+```
+
+## 需求分析
 
 ## 这“可能”是最完美的解决方案
 
