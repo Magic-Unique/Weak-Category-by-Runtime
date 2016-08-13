@@ -5,12 +5,14 @@ Magic-Unique 冷秋
 [TOC]
 
 ## 事先说好
-​	前不久看到 [@sunnyxx](http://weibo.com/p/1005051364395395) 想找一个性取向正常的实习生帮他分担一点工作量，当想起他和 [@ibireme]( http://weibo.com/ibireme) 秀的亲密自拍后我就知道事情并没有这么简单→_→。但是作为性取向正常的我还是比较关心滴滴的招人水准，于是我便想起了之前他发的一份[面试题](http://blog.sunnyxx.com/2015/07/04/ios-interview/)，其中有一题就是**如何使用Runtime实现weak属性**。在那之后 [@iOS程序犭袁](http://weibo.com/luohanchenyilong) 整理了一份有关这一份面试题的 [参考答案](https://github.com/ChenYilong/iOSInterviewQuestions/blob/master/01《招聘一个靠谱的iOS》面试题参考答案/《招聘一个靠谱的iOS》面试题参考答案（上）.md)，也包括了这个题目。
+​	前不久看到 [@sunnyxx](http://weibo.com/p/1005051364395395) 想找一个性取向正常的实习生帮他分担一点工作量，当想起他和 [@ibireme]( http://weibo.com/ibireme) 秀的亲密自拍后我就知道事情并没有这么简单→_→。但是作为刚毕业且性取向正常的我还是比较关心滴滴的招人水准，于是我便想起了之前他发的一份[面试题](http://blog.sunnyxx.com/2015/07/04/ios-interview/)，其中有一题就是**如何使用Runtime实现weak属性**。在那之后 [@iOS程序犭袁](http://weibo.com/luohanchenyilong) 整理了一份有关这一份面试题的 [参考答案](https://github.com/ChenYilong/iOSInterviewQuestions/blob/master/01《招聘一个靠谱的iOS》面试题参考答案/《招聘一个靠谱的iOS》面试题参考答案（上）.md)，也包括了这个题目。
 ​	看了整理的答案后觉得方法妥当，唯一不足的是不够严谨。于是我自己学习答案上的思维后修补了一些不足之处。如有大神觉得可以改进的地方望不吝指出~。
 
 ​	前方高能预警！！！！老司机要开车了！！请站稳坐稳手扶好。。。
 
 ​	这是一篇“我认为是一个很复杂的”文章。虽说复杂，但是涉及的都是OC基础知识。文章前面会介绍一下涉及点，后面是分析需求、定制方案以及具体实现。如果看不懂的话仅仅了解文章前面的一些基础知识点也是不错滴（也可能是我写的不够好。。。新手写文章请轻喷）。
+
+​	另外我不怎么喜欢倒序介绍，而是从零开始讲起，因为我更希望读者能够了解思考的步骤，锻炼思维，而不是仅仅看见成果。如果你不喜欢这种风格，我推荐你从后往前看。。。
 
 ## 涉及点——weak & assign
 
@@ -156,7 +158,7 @@ NSLog(@"%@", [obj associatedObjectForKey:nameForBind]);	// read value with key2 
 ​	于是我们有：
 
 ```objective-c
-/** 这是一个 NSString => NSValue(const char *) 的字典 */
+/** 这是一个 NSString => NSValue< const char * >的字典 */
 static NSMutableDictionary *keyBuffer;
 
 @implementation NSObject (Association)
@@ -196,6 +198,8 @@ static NSMutableDictionary *keyBuffer;
 
 @end
 ```
+
+基于这个分类，我们就可以用 1 行 `set` 方法 + 1 行 `get` 方法即可实现关联对象。
 
 ### policy 的选择
 
@@ -263,13 +267,11 @@ typedef OBJC_ENUM(uintptr_t, objc_AssociationPolicy) {
 
 2.   值对象在销毁时机，即在执行 `dealloc` 方法的时候
 
-       把自己记录的 “谁” 的 “什么属性” 设置为 `nil`。
+     把自己记录的 “谁” 的 “什么属性” 设置为 `nil`。
 
 这些就是基本的实现思路。同时，为了不影响 “宿主对象” 的生命周期，故 1 中保存 “宿主对象” 的引用也要是 `weak` 的。总结以上分析后，即可得到我们第一步的代码，你可以在**Demo-PlanStep-1**看到这个版本的代码。
 
 ```objective-c
-/** ======== 以下是核心代码 ======= */
-
 /** 宿主类的分类 */
 
 @implementation MUHostClass (Association)
@@ -286,7 +288,9 @@ const static char kValueObject = '0';
 }
 
 @end
-  
+```
+
+```objective-c
 /** 值类的主要实现 */
 
 @interface MUValueClass ()
@@ -313,17 +317,16 @@ const static char kValueObject = '0';
 }
 
 @end
-
 ```
 
 ​	整理 **Demo-PlanStep-1** 的代码，即可知道初步方案的**开发者角度**的代码量：
 
 > 1. 宿主类的分类：key定义（1行）+ set方法（2行）+ get方法（1行） = 4行
-> 2. 值类：传值方法（2行）+ dealloc方法（1行）= 3行 （该步骤必须在类的“主实现”里做）
+> 2. 值类：实例变量定义（2行）+ 传值方法（2行）+ dealloc方法（1行）= 5行 （该步骤必须在类的“主实现”里做）
 >
-> 总计：7行 （其中包括**改写已有类的主文件** 3 行，也就是 “值类” 的一个方法和 `dealloc` 的代码）
+> 总计：9 行 （其中包括**改写已有类的主文件** 5 行，也就是 “值类” 的一个方法和 `dealloc` 的代码）
 
-​	排除轮子内部实现的代码量，使用轮子的人用 7 行代码即可实现一个 `weak` 属性，这一点还是可以接受的。方案一里需求基本达到，但是这个方案需要使用者在“有可能被弱引用的对象的类”里去写代码，违背了轮子的“不入侵源代码，减少对源代码的影响”的规则，故这个方案不可行，接下来改造方案一。
+​	排除轮子内部实现的代码量（压根就没有），使用轮子的人用 7 行代码即可实现一个 `weak` 属性，这一点还是可以接受的。方案一里需求基本达到，但是这个方案需要开发者在“有可能被弱引用的对象的类”里去写代码，违背了轮子的“不入侵源代码，减少对源代码的影响”的规则，故这个方案不可行，接下来改造方案一。
 
 ### 参考答案中的实现
 
@@ -370,17 +373,15 @@ const static char kValueObject = '0';
 
 我们可以自己创建一个 A 类，然后在“宿主对象”和“值对象”建立 `weak` 关系的时候，偷偷地创建一个 A 类的实例 a，绑定在 “值对象” 上。当“值对象”销毁后，这个 a 也会被销毁。而 A 类是轮子的内部类，其 `dealloc` 方法可以随意改造。这样就可以把 `宿主对象.某属性 = nil` 这段代码写在 A 类的 `dealloc` 方法里。由于 `[a dealloc]` 与 `[值对象 dealloc]` 是一起执行的，我们便做到**在不改原有类的情况下捕获原有类的 `dealloc` 方法**。总结来说在 `Category` 里我们要用关联对象的方法让“值类型”强引用 a。
 
-​	由于 a 的存在，且 A 是一个内部类，因此我们可以给 A 类创建一个弱引用属性，让他持有“宿主对象”。同时可以给 A 类创建一个强引用属性，让他持有 `set` 方法。不知不觉就把问题 1 给解决了ヾ(=^▽^=)ノ。
+​	由于 a 的存在，且 A 是一个内部类，因此我们可以给 A 类创建一个弱引用属性，让他持有“宿主对象”。同时可以给 A 类创建一个 `SEL` 属性，让他持有 `set` 方法。不知不觉就把问题 1 给解决了ヾ(=^▽^=)ノ。
 
 ​	改造后的方案代码是**Demo-PlanStep-2**，思维图如下：
 
 ![](resources/pic-second.png)
 
-整理核心代码，具体如下：
+整理核心代码，具体如下（涉及 block 是无参无返回值的 block）：
 
 ```objective-c
-/** ======= 以下是核心代码 ======= */
-
 /** 宿主类的分类实现 */
 @implementation MUHostClass (Association)
 
@@ -389,12 +390,12 @@ const static char kValueObject = '0';
 - (void)setValueObject:(MUValueClass *)valueObject {
 	objc_setAssociatedObject(self, &kValueObject, valueObject, OBJC_ASSOCIATION_ASSIGN);
 	/**
-	 *  虽然这里没有循环引用，但是还是需要用弱引用丢给 block
-	 *	因为 valueObj 持有 weakTask，weakTask 持有 block，block 持有 self
-	 *	因此 self 至少要等到 valueObj 销毁后才能销毁。严重影响到 self 的生命周期
-	 *	这是参考答案中的一个缺点
+	 *  1. 虽然这里没有循环引用，但是还是需要把弱引用丢给 block
+	 *	   因为 valueObj 持有 weakTask，weakTask 持有 block，block 持有 self
+	 *	   因此 self 至少要等到 valueObj 销毁后才能销毁。严重影响到 self 的生命周期
 	 *
-	 *	而使用传递 block 的方式清空属性，而不是传递 set 方法的 SEL 的方式，是为了防止形成递归
+	 *	2. 而使用传递 block 的方式清空属性，而不是传递 set 方法的 SEL 的方式，是为了防止形成递归
+	 *	3. 第2点是我瞎说的
 	 */
 	__weak typeof(self) wself = self;
 	[valueObject setWeakReferenceTask:^{
@@ -407,8 +408,11 @@ const static char kValueObject = '0';
 }
 
 @end
-  
+```
+
+```objective-c
 /** 给所有的类添加扩展 */
+
 @implementation NSObject (MUWeakTask)
 
 static const char kWeakTask = '0';
@@ -419,7 +423,9 @@ static const char kWeakTask = '0';
 }
 
 @end
+```
 
+```objective-c
 /** 传说中的 A 类 */
   
 @implementation MUWeakTask
@@ -443,10 +449,33 @@ static const char kWeakTask = '0';
 }
 
 @end
-
 ```
 
+整理 **Demo-PlanStep-2** 的代码，即可知道改进方案的**开发者角度**的代码量：
+
+> 1. 宿主类的分类：key定义（1行）+ set方法（4行）+ get方法（1行） = 6行
+> 2. 值类：0 行
+>
+> 总计：6 行 （其中**不存在改写已有类的主文件**的代码）
+>
+> 不知你还是否记得上文中**涉及点——关联对象**中的**key 的取值**小节里，我们封装了一个关联对象的分类，仅仅用两行代码实现关联对象（同时不需要 key 的定义），所以可以利用那一小节的思维，封装好 `set` 方法中的代码，减少开发者的代码量，统计封装之后数据为：
+>
+> 1. 宿主类的分类：key定义（0行）+ set方法（1行）+ get方法（1行）= 2行
+> 2. 值类：2 行
+>
+> 总计：2 行
+
 ## 需求分析
+
+​	通过上述分析，基本了解了这个参考答案的设计思维，已经可以满足一部分的需求。但是如果我们仔细分析实际开发的情况，就会发现有很多 bug。
+
+### 情况一——宿主对象设置新的值
+
+### 情况二——宿主对象有两个弱引用属性指向同一个值
+
+### 情况三——多个宿主对象弱引用同一个值
+
+### 综上所述
 
 ## 这“可能”是最完美的解决方案
 
