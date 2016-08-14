@@ -1,8 +1,8 @@
 # Weak-Category-by-Runtime
 
-A tool to create weakly property in category. **explain**
+A tool to create weakly property in category. **[explain](http://www.jianshu.com/p/ed65d71554d8)**
 
-一个在分类中创建弱引用属性的工具，**原文链接**。
+一个在分类中创建弱引用属性的工具，**[原文链接](http://www.jianshu.com/p/ed65d71554d8)**。
 
 ## USAGE 使用
 
