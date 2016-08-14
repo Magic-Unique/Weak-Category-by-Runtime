@@ -29,7 +29,7 @@
 
 @implementation MUDeallocTask
 
-- (void)setTask:(DeallocBlock)task forTarget:(id)target key:(NSString *)key {
+- (void)addTask:(DeallocBlock)task forTarget:(id)target key:(NSString *)key {
     MUDeallocTaskItem *taskItem = [MUDeallocTaskItem taskItemWithTarget:target key:key task:task];
     if ([self.taskSet containsObject:taskItem]) {
         [self.taskSet removeObject:taskItem];

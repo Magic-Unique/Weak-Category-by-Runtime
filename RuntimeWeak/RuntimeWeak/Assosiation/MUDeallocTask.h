@@ -12,7 +12,7 @@ typedef void(^DeallocBlock)(void);
 
 @interface MUDeallocTask : NSObject
 
-- (void)setTask:(DeallocBlock)task forTarget:(id)target key:(NSString *)key;
+- (void)addTask:(DeallocBlock)task forTarget:(id)target key:(NSString *)key;
 
 - (void)removeTaskForTarget:(id)target key:(NSString *)key;
 

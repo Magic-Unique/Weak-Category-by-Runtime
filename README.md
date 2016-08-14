@@ -77,7 +77,7 @@ id objc_getAssociatedObject(id obj, const void *key);
 
 /** 所有要增加的属性的 set 方法都可以调用这个方法来实现 */
 - (void)setAssociatedObject:(id)obj forKey:(NSString *)key {
-	objc_setAssociatedObject(self, key.UTF8String, categoryProperty, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(self, key.UTF8String, obj, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 /** 所有要增加的属性的 get 方法都可以调用这个方法来实现 */
@@ -267,7 +267,7 @@ typedef OBJC_ENUM(uintptr_t, objc_AssociationPolicy) {
 
 2.   值对象在销毁时机，即在执行 `dealloc` 方法的时候
 
-     把自己记录的 “谁” 的 “什么属性” 设置为 `nil`。
+       把自己记录的 “谁” 的 “什么属性” 设置为 `nil`。
 
 这些就是基本的实现思路。同时，为了不影响 “宿主对象” 的生命周期，故 1 中保存 “宿主对象” 的引用也要是 `weak` 的。总结以上分析后，即可得到我们第一步的代码，你可以在**Demo-PlanStep-1**看到这个版本的代码。
 
@@ -461,7 +461,7 @@ static const char kWeakTask = '0';
 > 不知你还是否记得上文中**涉及点——关联对象**中的**key 的取值**小节里，我们封装了一个关联对象的分类，仅仅用两行代码实现关联对象（同时不需要 key 的定义），所以可以利用那一小节的思维，封装好 `set` 方法中的代码，减少开发者的代码量，统计封装之后数据为：
 >
 > 1. 宿主类的分类：key定义（0行）+ set方法（1行）+ get方法（1行）= 2行
-> 2. 值类：2 行
+> 2. 值类：0 行
 >
 > 总计：2 行
 
@@ -471,13 +471,79 @@ static const char kWeakTask = '0';
 
 ### 情况一——宿主对象设置新的值
 
-### 情况二——宿主对象有两个弱引用属性指向同一个值
+**描述**：宿主对象的 weak 属性是可以重复设置值的，当二次设置某个对象的属性后，就会覆盖之前的值，而此时之前的值对象就和宿主对象无任何关系。
+
+**问题**：在参考答案中，若出现描述中的情况时，旧的“值对象”引用的 `DeallocTask` 对象中保存的销毁任务 `block` 依旧是这个宿主对象的 `block` 。当这个旧的值对象销毁后仍旧会执行那个 `block` ，这样就会导致宿主对象的新值会“无缘无故”没了。。。（新的值对象表示：宝宝躺着也中枪。。）
+
+**方案**：属性设置新的值之前，把旧的值的 `block` 删除。
+
+### 情况二——宿主对象有多个弱引用属性指向同一个值
+
+**描述**：`UITableView` 的 `dataSource` 和 `delegate` 一般都是同一个 `UIViewController`
+
+**问题**：若出现描述中的情况时，“值对象”只能保存一个 `DeallocTask` ，具体如下：
+
+```objective-c
+hostObj.property1 = valueObj;	// 先设置
+hostObj.property2 = valueObj;	// 后设置
+valueObj = nil;					// 值对象销毁
+hostObj.property1;				// 依旧是值对象
+hostObj.property2;				// nil
+```
+
+（property1 表示：有了新欢就忘了旧爱！！！能不能有始有终！！！）
+
+**方案**：具体方案请看**情况三**
 
 ### 情况三——多个宿主对象弱引用同一个值
 
+**描述**：一个对象很有可能被多个变量弱引用，而当这个对象销毁后，要把**所有**弱引用它的变量都要设置为 `nil`。
+
+**问题**：与**情况二**相同，“值对象”只能保存最后一个弱引用他的“宿主对象”的销毁 `block`。
+
+**方案**：该方案与**情况二**通用，均解决多引用同对象的问题。简单来说“有几个 `weak` 引用自己，自己就有几个销毁 `block`”。
+因此，“自己的 `deallocTask` 对象保存的 `block` 应该是多个，而不是单个”，也就是我们需要一个容器存放多个 `block` 并在 `dealloc` 方法中依次执行。
+
 ### 综上所述
+
+1. `block` 可以被删除
+2. `block` 可以被增加
+
+所以我们需要一个 `Mutable` 容器来保存 `block` 。另外，由于很有情况出现**同宿主的不同属性**的情况，以及**不同宿主的同属性**情况，所以在这个容器里应该是建立一个 `obj,key => block` 的映射关系，即由一个“宿主对象”和一个“属性名称”决定一个销毁 `block` 。在 `Foundation` 中，键值映射关系由 `NSDictionary` 或者 `NSMapTable` 实现，但都是“一对一”的关系。所以我们可以建立一个新的类，用作映射关系的 `键` ，这个类保存一个对象（weak）和一个字符串，并且利用 `hash` 和 `isEqual:` 方法使这个特定的 `键` 能够正常工作。
 
 ## 这“可能”是最完美的解决方案
 
+改造 `DeallocTask` 类，让其拥有保存多个 `block` 的能力：
 
+>   array 属性，保存 DeallocTaskItem 对象列表，每一个 DeallocTaskItem 保存 hostObj、property、block
+>
+>   add 方法，遍历 hostObj、property 都相同的 item 是否存在 array 中，存在就销毁，然后创建 item 存入 array
+>
+>   remove 方法，从 array 中删除相同的 hostObj、property 的那个 item
+>
+>   dealloc 方法，遍历 array，并执行每一个 item 中的 block
 
+改造新的 property 的 set 方法：
+
+> 获取旧的值对象，并调用这个值对象的 deallocTask 的 remove 方法
+>
+> 设置新的值对象
+>
+> 调用新的值对象的 deallocTask 的 add 方法
+
+以上代码均在**RuntimeWeak**中实现。整理代码：
+
+> 1. 宿主对象的分类：key定义（0行）+ set方法（1行）+ get方法（1行）= 2 行
+> 2. 值对象：0 行
+>
+> 总计：2 行
+
+轮子经过改造，实现 2 行代码给现有的类添加 weak 属性
+
+## 写在后面
+
+如果你很淡定地看到这里，这说明你的水平可能很高或者可能很低。。如果你是大神，也烦请支出文章中的不足，毕竟我还有很多需要学习的地方。如果你是新手，就算看不懂也可以学习学习文中的一些涉及到的基础知识，还有一些细节。
+
+在此非常感谢你能看到这里。
+
+最后补充一句：我的性取向非常正常。
